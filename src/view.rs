@@ -25,6 +25,10 @@ struct SearchInfo {
     query: Option<Line>,
 }
 
+struct CopyInfo {
+    start: Location,
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub enum SearchDirection {
     #[default]
@@ -41,6 +45,7 @@ pub struct View {
     needs_redraw: bool,
     size: Size,
     search_info: Option<SearchInfo>,
+    copy_info: Option<CopyInfo>,
 }
 
 impl View {
@@ -281,6 +286,30 @@ impl View {
         self.search_in_direction(self.text_location.clone(), SearchDirection::default());
     }
 
+    pub fn copy(&self) -> Option<String> {
+        if let Some(copy_info) = &self.copy_info {
+            return self.buffer.get_substring(
+                copy_info.start.line_index,
+                copy_info.start.grapheme_index..self.text_location.grapheme_index,
+            );
+        }
+
+        None
+    }
+
+    pub fn paste(&mut self, text: &str) {
+        for char in text.chars() {
+            match char {
+                '\r' => {
+                    self.insert_newline();
+                }
+                _ => {
+                    self.insert_char(char);
+                }
+            }
+        }
+    }
+
     pub fn search_in_direction(&mut self, from: Location, direction: SearchDirection) {
         if let Some(location) = self.get_search_query().and_then(|query| {
             if query.is_empty() {
@@ -336,6 +365,22 @@ impl View {
         self.search_info = None;
         self.mark_redraw(true);
     }
+
+    pub fn enter_copy(&mut self) {
+        self.copy_info = Some(CopyInfo {
+            start: self.text_location.clone(),
+        });
+    }
+
+    pub fn exit_copy(&mut self) {
+        self.copy_info = None;
+        self.mark_redraw(true);
+    }
+
+    pub fn dismiss_copy(&mut self) {
+        self.copy_info = None;
+        self.mark_redraw(true);
+    }
 }
 
 impl UIComponent for View {
@@ -364,9 +409,15 @@ impl UIComponent for View {
             .as_ref()
             .and_then(|search_info| search_info.query.as_deref());
         let selected_match = query.is_some().then_some(self.text_location.clone());
+        let copy = self
+            .copy_info
+            .as_ref()
+            .map(|info| (info.start.clone(), self.text_location.clone()));
+
         let mut highlighter = Highlighter::new(
             query,
             selected_match,
+            copy,
             self.buffer.get_file_info().get_file_type(),
         );
 

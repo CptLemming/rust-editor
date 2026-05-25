@@ -20,13 +20,14 @@ const QUIT_TIMES: u8 = 3;
 enum PromptType {
     Search,
     Save,
+    Copy,
     #[default]
     None,
 }
 
 impl PromptType {
-    fn is_none(&self) -> bool {
-        *self == Self::None
+    fn needs_prompt(&self) -> bool {
+        matches!(self, Self::Save | Self::Search)
     }
 }
 
@@ -100,7 +101,7 @@ impl Editor {
     fn eval(&mut self, event: Event) {
         let should_process = match &event {
             Event::Key(KeyEvent { kind, .. }) => kind == &KeyEventKind::Press,
-            Event::Resize(_, _) => true,
+            Event::Resize(_, _) | Event::Paste(_) => true,
             _ => false,
         };
 
@@ -122,6 +123,7 @@ impl Editor {
         match self.prompt_type {
             PromptType::Search => self.process_command_search_prompt(command),
             PromptType::Save => self.process_command_save_prompt(command),
+            PromptType::Copy => self.process_command_copy_prompt(command),
             PromptType::None => self.process_command_no_prompt(command),
         }
     }
@@ -137,6 +139,8 @@ impl Editor {
             Command::System(System::Quit | System::Resize(_) | System::Dismiss) => {}
             Command::System(System::Search) => self.set_prompt(PromptType::Search),
             Command::System(System::Save) => self.handle_save_command(),
+            Command::System(System::Copy) => self.set_prompt(PromptType::Copy),
+            Command::System(System::Paste(text)) => self.view.paste(&text),
             Command::Edit(edit_command) => self.view.handle_edit_command(edit_command),
             Command::Move(move_command) => self.view.handle_move_command(move_command),
         }
@@ -144,7 +148,14 @@ impl Editor {
 
     fn process_command_save_prompt(&mut self, command: Command) {
         match command {
-            Command::System(System::Quit | System::Resize(_) | System::Search | System::Save)
+            Command::System(
+                System::Quit
+                | System::Resize(_)
+                | System::Paste(_)
+                | System::Search
+                | System::Save
+                | System::Copy,
+            )
             | Command::Move(_) => {}
             Command::System(System::Dismiss) => {
                 self.set_prompt(PromptType::None);
@@ -156,6 +167,39 @@ impl Editor {
                 self.set_prompt(PromptType::None);
             }
             Command::Edit(edit_command) => self.command_bar.handle_edit_command(edit_command),
+        }
+    }
+
+    fn process_command_copy_prompt(&mut self, command: Command) {
+        match command {
+            Command::System(System::Dismiss) => {
+                self.set_prompt(PromptType::None);
+                self.update_message("");
+                self.view.dismiss_copy();
+            }
+            Command::Edit(Edit::Enter) => {
+                self.set_prompt(PromptType::None);
+
+                if let Some(text) = self.view.copy() {
+                    let _ = self.terminal.copy(&text);
+                    self.update_message("Copied to clipboard");
+                }
+
+                self.view.exit_copy();
+            }
+            Command::Move(move_command) => {
+                self.view.handle_move_command(move_command);
+                self.view.mark_redraw(true);
+            }
+            Command::System(
+                System::Quit
+                | System::Resize(_)
+                | System::Paste(_)
+                | System::Search
+                | System::Save
+                | System::Copy,
+            )
+            | Command::Edit(_) => {}
         }
     }
 
@@ -176,18 +220,29 @@ impl Editor {
             }
             Command::Move(Move::Right | Move::Down) => self.view.search_next(),
             Command::Move(Move::Up | Move::Left) => self.view.search_prev(),
-            Command::System(System::Quit | System::Resize(_) | System::Search | System::Save)
+            Command::System(
+                System::Quit
+                | System::Resize(_)
+                | System::Paste(_)
+                | System::Search
+                | System::Save
+                | System::Copy,
+            )
             | Command::Move(_) => {}
         }
     }
 
     fn in_prompt(&mut self) -> bool {
-        !self.prompt_type.is_none()
+        self.prompt_type.needs_prompt()
     }
 
     fn set_prompt(&mut self, prompt: PromptType) {
         match prompt {
             PromptType::None => self.message_bar.mark_redraw(true),
+            PromptType::Copy => {
+                self.view.enter_copy();
+                self.update_message("Copy mode (Esc to cancel, enter to accept)");
+            }
             PromptType::Save => self.command_bar.set_prompt("Save as: "),
             PromptType::Search => {
                 self.view.enter_search();

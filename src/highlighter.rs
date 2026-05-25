@@ -21,20 +21,24 @@ fn create_syntax_highlighter(file_type: &SupportedFileTypes) -> Option<Box<dyn S
 pub struct Highlighter<'a> {
     syntax_highlighter: Option<Box<dyn SyntaxHighlighter>>,
     search_result_highlighter: Option<SearchResultHighlighter<'a>>,
+    copy_highlighter: Option<CopyHighlighter>,
 }
 
 impl<'a> Highlighter<'a> {
     pub fn new(
         matched_word: Option<&'a str>,
         selected_match: Option<Location>,
+        copy: Option<(Location, Location)>,
         file_type: &SupportedFileTypes,
     ) -> Self {
         let search_result_highlighter = matched_word
             .map(|matched_word| SearchResultHighlighter::new(matched_word, selected_match));
+        let copy_highlighter = copy.map(|copy| CopyHighlighter::new(copy.0, copy.1));
 
         Self {
             syntax_highlighter: create_syntax_highlighter(file_type),
             search_result_highlighter,
+            copy_highlighter,
         }
     }
 
@@ -53,6 +57,12 @@ impl<'a> Highlighter<'a> {
             }
         }
 
+        if let Some(copy_highlighter) = &self.copy_highlighter {
+            if let Some(annotations) = copy_highlighter.get_annotations(index) {
+                result.extend(annotations.iter());
+            }
+        }
+
         result
     }
 
@@ -62,6 +72,9 @@ impl<'a> Highlighter<'a> {
         }
         if let Some(search_result_highlighter) = &mut self.search_result_highlighter {
             search_result_highlighter.highlight(index, line);
+        }
+        if let Some(copy_highlighter) = &mut self.copy_highlighter {
+            copy_highlighter.highlight(index, line);
         }
     }
 }
@@ -143,6 +156,46 @@ impl<'a> SyntaxHighlighter for SearchResultHighlighter<'a> {
 
     fn get_annotations(&self, index: usize) -> Option<&Vec<Annotation>> {
         self.highlights.get(&index)
+    }
+}
+
+#[derive(Default)]
+pub struct CopyHighlighter {
+    start: Location,
+    end: Location,
+    highlights: HashMap<usize, Vec<Annotation>>,
+}
+
+impl SyntaxHighlighter for CopyHighlighter {
+    fn highlight(&mut self, index: usize, line: &Line) {
+        let mut result = Vec::new();
+        self.highlight_line(index, &mut result);
+
+        self.highlights.insert(index, result);
+    }
+
+    fn get_annotations(&self, index: usize) -> Option<&Vec<Annotation>> {
+        self.highlights.get(&index)
+    }
+}
+
+impl CopyHighlighter {
+    pub fn new(start: Location, end: Location) -> Self {
+        Self {
+            start,
+            end,
+            highlights: HashMap::new(),
+        }
+    }
+
+    fn highlight_line(&self, index: usize, result: &mut Vec<Annotation>) {
+        if index == self.start.line_index {
+            result.push(Annotation {
+                annotation_type: AnnotationType::Copy,
+                start_byte_index: self.start.grapheme_index,
+                end_byte_index: self.end.grapheme_index,
+            });
+        }
     }
 }
 

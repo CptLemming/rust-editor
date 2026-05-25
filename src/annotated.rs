@@ -12,6 +12,7 @@ pub enum AnnotationType {
     LifetimeSpecifier,
     Comment,
     String,
+    Copy,
 }
 
 #[derive(Debug)]

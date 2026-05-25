@@ -204,6 +204,12 @@ impl Buffer {
         })
     }
 
+    pub fn get_substring(&self, line_index: usize, range: Range<usize>) -> Option<String> {
+        self.lines
+            .get(line_index)
+            .map(|line| line.get_visible_graphemes(range))
+    }
+
     pub fn highlight(&self, index: usize, highlighter: &mut Highlighter) {
         if let Some(line) = self.lines.get(index) {
             highlighter.highlight(index, line);

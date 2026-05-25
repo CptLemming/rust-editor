@@ -1,4 +1,6 @@
+use crossterm::clipboard::CopyToClipboard;
 use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::style::{
     Attribute, Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor,
 };
@@ -104,6 +106,14 @@ impl From<AnnotationType> for TerminalAttribute {
                 }),
                 background: None,
             },
+            AnnotationType::Copy => Self {
+                foreground: Some(Color::Rgb { r: 0, g: 0, b: 0 }),
+                background: Some(Color::Rgb {
+                    r: 255,
+                    g: 10,
+                    b: 10,
+                }),
+            },
         }
     }
 }
@@ -114,7 +124,7 @@ pub struct Size {
     pub width: usize,
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Position {
     pub x: usize,
     pub y: usize,
@@ -136,6 +146,7 @@ impl Terminal {
     pub fn init(&self) -> anyhow::Result<()> {
         enable_raw_mode()?;
         self.enter_alternate_screen()?;
+        self.enable_bracketed_paste()?;
         self.disable_line_wrap()?;
         self.clear()?;
         self.execute()?;
@@ -248,6 +259,16 @@ impl Terminal {
         Ok(())
     }
 
+    pub fn enable_bracketed_paste(&self) -> anyhow::Result<()> {
+        self.queue_command(EnableBracketedPaste)?;
+        Ok(())
+    }
+
+    pub fn disable_bracketed_paste(&self) -> anyhow::Result<()> {
+        self.queue_command(DisableBracketedPaste)?;
+        Ok(())
+    }
+
     pub fn disable_line_wrap(&self) -> anyhow::Result<()> {
         self.queue_command(DisableLineWrap)?;
         Ok(())
@@ -258,8 +279,14 @@ impl Terminal {
         Ok(())
     }
 
+    pub fn copy(&self, text: &str) -> anyhow::Result<()> {
+        self.queue_command(CopyToClipboard::to_clipboard_from(text))?;
+        Ok(())
+    }
+
     pub fn terminate(&self) -> anyhow::Result<()> {
         self.leave_alternate_screen()?;
+        self.disable_bracketed_paste()?;
         self.enable_line_wrap()?;
         self.show_cursor()?;
         self.execute()?;

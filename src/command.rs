@@ -1,4 +1,7 @@
+use std::io::Read;
+
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use wl_clipboard_rs::paste;
 
 use crate::terminal::Size;
 
@@ -72,6 +75,8 @@ pub enum System {
     Quit,
     Dismiss,
     Search,
+    Copy,
+    Paste(String),
 }
 
 impl TryFrom<KeyEvent> for System {
@@ -86,6 +91,21 @@ impl TryFrom<KeyEvent> for System {
                 KeyCode::Char('q') => Ok(Self::Quit),
                 KeyCode::Char('s') => Ok(Self::Save),
                 KeyCode::Char('f') => Ok(Self::Search),
+                KeyCode::Char('c') => Ok(Self::Copy),
+                // Manual paste - Ctrl+V
+                KeyCode::Char('v') => paste::get_contents(
+                    paste::ClipboardType::Regular,
+                    paste::Seat::Unspecified,
+                    paste::MimeType::Text,
+                )
+                .map(|(mut pipe, _)| {
+                    let mut contents = vec![];
+                    let _ = pipe.read_to_end(&mut contents);
+
+                    String::from_utf8_lossy(&contents).to_string()
+                })
+                .map(Self::Paste)
+                .map_err(|err| format!("Paste error : {err:?}")),
                 _ => Err(format!("Unsupported CTRL+{code:?} combination")),
             }
         } else if modifiers == KeyModifiers::NONE && matches!(code, KeyCode::Esc) {
@@ -114,7 +134,8 @@ impl TryFrom<Event> for Command {
                 .or_else(|_| Move::try_from(key_event).map(Command::Move))
                 .or_else(|_| System::try_from(key_event).map(Command::System))
                 .map_err(|_err| format!("Event not supported : {key_event:?}")),
-
+            // Terminal specific paste - Ctrl+Shift+V
+            Event::Paste(text) => Ok(Self::System(System::Paste(text))),
             Event::Resize(width, height) => Ok(Self::System(System::Resize(Size {
                 height: height as usize,
                 width: width as usize,
